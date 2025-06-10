@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Real-time Map Voting</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 40px 10px;
+    }
+    .container {
+      width: 90%;
+      max-width: 960px;
+      background: #fff;
+      border-radius: 15px;
+      box-shadow: 0 10px 20px rgba(0,0,0,0.2);
+      padding: 20px;
+    }
+    h2 {
+      text-align: center;
+      color: #333;
+      margin-bottom: 10px;
+    }
+    #map {
+      width: 100%;
+      height: 400px;
+      border-radius: 10px;
+      margin-bottom: 15px;
+    }
+    .status, .position, .instructions {
+      display: flex;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      margin-bottom: 15px;
+    }
+    .card {
+      flex: 1;
+      min-width: 240px;
+      background: #e0f7fa;
+      padding: 15px;
+      border-radius: 10px;
+      color: #00796b;
+      box-shadow: inset 0 0 5px rgba(0,0,0,0.05);
+    }
+    .card.green { background: #e8f5e9; color: #388e3c; }
+    .card.orange { background: #fff3e0; color: #e65100; }
+    .vote-list {
+      list-style: none;
+      padding-left: 0;
+    }
+    .vote-list li {
+      margin-bottom: 5px;
+      font-size: 0.95em;
+    }
+    .vote-btn {
+      background: #42a5f5;
+      color: white;
+      padding: 5px 10px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.9em;
+      margin-top: 5px;
+    }
+    .vote-btn:hover { background: #1e88e5; }
+    #locateMeBtn {
+      margin-top: 10px;
+      padding: 6px 12px;
+      background: #43a047;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    #locateMeBtn:hover {
+      background: #388e3c;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>🗺️ Real-time Map Voting</h2>
+    <div id="map"></div>
+
+    <div class="card" style="margin-top: 15px; background:#f3e5f5; color:#6a1b9a;">
+      <strong>🔍 Search Location by Coordinates:</strong><br />
+      <label>
+        Latitude: 
+        <input type="number" step="0.00001" id="inputLat" placeholder="Contoh: -" style="width:120px;"/>
+      </label>
+      &nbsp;&nbsp;
+      <label>
+        Longitude: 
+        <input type="number" step="0.00001" id="inputLng" placeholder="Contoh: 110.298" style="width:120px;"/>
+      </label>
+      &nbsp;&nbsp;
+      <button id="goToCoordBtn" style="padding:5px 10px; border:none; background:#8e24aa; color:#fff; border-radius:6px; cursor:pointer;">
+        Go To Coordinate
+      </button>
+      <button id="locateMeBtn">📍 Locate Me</button>
+    </div>
+
+    <div class="status">
+      <div class="card">
+        <strong>Status:</strong> Connected to server via Socket.IO
+        <br>🟢 Real-time voting active
+      </div>
+      <div class="card green" id="currentPosition">
+        <strong>Selected Location:</strong><br />
+        Lat: <span id="cur-lat">-</span><br />
+        Lng: <span id="cur-lng">-</span>
+      </div>
+    </div>
+
+    <div class="card orange instructions">
+      <div>
+        📌 <strong>Instructions:</strong><br />
+        Double-click anywhere on the map to add a marker.<br />
+        Click on a marker to vote. The highest voted locations are listed below.
+      </div>
+    </div>
+
+    <div class="card" style="margin-top: 10px;">
+      <strong>🔥 Top Voted Locations:</strong>
+      <ul class="vote-list" id="topList"></ul>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    const map = L.map('map').setView([-7.9913, 110.298], 13);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
+
+    let markersOnMap = {};
+    let gpsMarker = null;
+    let latitude = null, longitude = null;
+
+    function renderMarkers(data) {
+      for (let id in markersOnMap) {
+        map.removeLayer(markersOnMap[id]);
+      }
+      markersOnMap = {};
+
+      for (let id in data) {
+        const { lat, lng, votes } = data[id];
+        const marker = L.marker([lat, lng]).addTo(map);
+
+        marker.bindPopup(`
+          <b>Location</b><br>
+          Lat: ${lat.toFixed(5)}<br>
+          Lng: ${lng.toFixed(5)}<br>
+          Votes: <span id="votes-${id}">${votes}</span><br>
+          <button class="vote-btn" onclick="vote('${id}')">Vote +1</button>
+          <button class="vote-btn" style="background:#ef5350;" onclick="deleteMarker('${id}')">🗑 Delete</button>
+        `);
+
+        markersOnMap[id] = marker;
+      }
+
+      updateSidebar(data);
+    }
+
+    function updateSidebar(data) {
+      const list = document.getElementById('topList');
+      list.innerHTML = '';
+
+      const sorted = Object.values(data).sort((a, b) => b.votes - a.votes);
+      sorted.forEach(({ lat, lng, votes }) => {
+        const li = document.createElement('li');
+        li.textContent = `(${lat.toFixed(4)}, ${lng.toFixed(4)}) - Votes: ${votes}`;
+        list.appendChild(li);
+      });
+    }
+
+    function vote(id) {
+      socket.emit('voteMarker', id);
+    }
+    window.vote = vote;
+
+    function deleteMarker(id) {
+      if (confirm('Yakin ingin menghapus marker ini?')) {
+        socket.emit('deleteMarker', id);
+      }
+    }
+    window.deleteMarker = deleteMarker;
+
+    socket.on('markersUpdate', (data) => {
+      renderMarkers(data);
+    });
+
+    map.on('dblclick', (e) => {
+      const { lat, lng } = e.latlng;
+      document.getElementById("cur-lat").textContent = lat.toFixed(5);
+      document.getElementById("cur-lng").textContent = lng.toFixed(5);
+      socket.emit('addMarker', { lat, lng });
+    });
+
+    document.getElementById('goToCoordBtn').addEventListener('click', () => {
+      const latInput = parseFloat(document.getElementById('inputLat').value);
+      const lngInput = parseFloat(document.getElementById('inputLng').value);
+      if (isNaN(latInput) || isNaN(lngInput)) {
+        alert('Mohon masukkan koordinat yang valid!');
+        return;
+      }
+      map.setView([latInput, lngInput], 15);
+      document.getElementById("cur-lat").textContent = latInput.toFixed(5);
+      document.getElementById("cur-lng").textContent = lngInput.toFixed(5);
+    });
+
+    document.getElementById('locateMeBtn').addEventListener('click', () => {
+      if (!navigator.geolocation) {
+        alert("Geolocation tidak didukung browser Anda.");
+        return;
+      }
+
+      navigator.geolocation.getCurrentPosition((position) => {
+        latitude = position.coords.latitude;
+        longitude = position.coords.longitude;
+        map.setView([latitude, longitude], 16);
+
+        if (gpsMarker) {
+          gpsMarker.setLatLng([latitude, longitude]);
+        } else {
+          gpsMarker = L.marker([latitude, longitude], { draggable: true }).addTo(map)
+    .bindPopup("📍 Lokasi Anda (bisa digeser):<br>Geser marker untuk menyesuaikan dengan lokasi sebenarnya.<br>Jika ingin memindahkan ke titik lain, hapus marker ini terlebih dahulu, lalu klik di lokasi baru.")
+    .openPopup();
+
+
+          // Kirim marker dengan ID khusus ke server
+          socket.emit('addMarker', { id: 'gps-marker', lat: latitude, lng: longitude });
+
+          // Tangani event dragend untuk update posisi ke server
+          gpsMarker.on("dragend", function (e) {
+            const newPos = e.target.getLatLng();
+            document.getElementById("cur-lat").textContent = newPos.lat.toFixed(5);
+            document.getElementById("cur-lng").textContent = newPos.lng.toFixed(5);
+
+            socket.emit("updateMarkerPosition", {
+              id: 'gps-marker',
+              lat: newPos.lat,
+              lng: newPos.lng,
+            });
+
+            latitude = newPos.lat;
+            longitude = newPos.lng;
+          });
+        }
+
+        document.getElementById("cur-lat").textContent = latitude.toFixed(5);
+        document.getElementById("cur-lng").textContent = longitude.toFixed(5);
+
+      }, () => {
+        alert("Gagal mendapatkan lokasi.");
+      });
+    });
+  </script>
+</body>
+</html>
