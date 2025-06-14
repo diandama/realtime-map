@@ -90,6 +90,11 @@
     <h2>🗺️ Real-time Map Voting</h2>
     <div id="map"></div>
 
+    <div class="card" style="margin-top:10px;">
+      <strong>📝 Nama Lokasi (opsional):</strong><br />
+      <input type="text" id="inputPlaceName" placeholder="Contoh: Alun-Alun Klaten" style="width: 100%; padding: 5px; margin-top: 5px;"/>
+    </div>
+
     <div class="card" style="margin-top: 15px; background:#f3e5f5; color:#6a1b9a;">
       <strong>🔍 Search Location by Coordinates:</strong><br />
       <label>
@@ -123,7 +128,7 @@
     <div class="card orange instructions">
       <div>
         📌 <strong>Instructions:</strong><br />
-        Double-click anywhere on the map to add a marker.<br />
+        Double-click anywhere on the map to add a marker dengan nama lokasi.<br />
         Click on a marker to vote. The highest voted locations are listed below.
       </div>
     </div>
@@ -138,11 +143,12 @@
   <script src="/socket.io/socket.io.js"></script>
   <script>
     const socket = io();
-    const map = L.map('map').setView([-7.9913, 110.298], 13);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      attribution: '© OpenStreetMap contributors'
-    }).addTo(map);
+const map = L.map('map').setView([-2.5, 118.0], 5); // Tengah Indonesia, zoom cukup luas
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19,
+  attribution: '© OpenStreetMap contributors'
+}).addTo(map);
+
 
     let markersOnMap = {};
     let gpsMarker = null;
@@ -155,11 +161,11 @@
       markersOnMap = {};
 
       for (let id in data) {
-        const { lat, lng, votes } = data[id];
+        const { lat, lng, votes, name } = data[id];
         const marker = L.marker([lat, lng]).addTo(map);
 
         marker.bindPopup(`
-          <b>Location</b><br>
+          <b>📍 ${name || "Tanpa Nama"}</b><br>
           Lat: ${lat.toFixed(5)}<br>
           Lng: ${lng.toFixed(5)}<br>
           Votes: <span id="votes-${id}">${votes}</span><br>
@@ -178,9 +184,9 @@
       list.innerHTML = '';
 
       const sorted = Object.values(data).sort((a, b) => b.votes - a.votes);
-      sorted.forEach(({ lat, lng, votes }) => {
+      sorted.forEach(({ lat, lng, votes, name }) => {
         const li = document.createElement('li');
-        li.textContent = `(${lat.toFixed(4)}, ${lng.toFixed(4)}) - Votes: ${votes}`;
+        li.textContent = `${name || "Tanpa Nama"} - (${lat.toFixed(4)}, ${lng.toFixed(4)}) - Votes: ${votes}`;
         list.appendChild(li);
       });
     }
@@ -203,9 +209,18 @@
 
     map.on('dblclick', (e) => {
       const { lat, lng } = e.latlng;
+      const placeName = document.getElementById('inputPlaceName').value.trim();
+
       document.getElementById("cur-lat").textContent = lat.toFixed(5);
       document.getElementById("cur-lng").textContent = lng.toFixed(5);
-      socket.emit('addMarker', { lat, lng });
+
+      socket.emit('addMarker', {
+        lat,
+        lng,
+        name: placeName || "Tanpa Nama"
+      });
+
+      document.getElementById('inputPlaceName').value = "";
     });
 
     document.getElementById('goToCoordBtn').addEventListener('click', () => {
@@ -235,14 +250,11 @@
           gpsMarker.setLatLng([latitude, longitude]);
         } else {
           gpsMarker = L.marker([latitude, longitude], { draggable: true }).addTo(map)
-    .bindPopup("📍 Lokasi Anda (bisa digeser):<br>Geser marker untuk menyesuaikan dengan lokasi sebenarnya.<br>Jika ingin memindahkan ke titik lain, hapus marker ini terlebih dahulu, lalu klik di lokasi baru.")
-    .openPopup();
+            .bindPopup("📍 Lokasi Anda (bisa digeser):<br>Geser marker untuk menyesuaikan lokasi sebenarnya.")
+            .openPopup();
 
+          socket.emit('addMarker', { id: 'gps-marker', lat: latitude, lng: longitude, name: 'Lokasi Saya' });
 
-          // Kirim marker dengan ID khusus ke server
-          socket.emit('addMarker', { id: 'gps-marker', lat: latitude, lng: longitude });
-
-          // Tangani event dragend untuk update posisi ke server
           gpsMarker.on("dragend", function (e) {
             const newPos = e.target.getLatLng();
             document.getElementById("cur-lat").textContent = newPos.lat.toFixed(5);
@@ -261,7 +273,6 @@
 
         document.getElementById("cur-lat").textContent = latitude.toFixed(5);
         document.getElementById("cur-lng").textContent = longitude.toFixed(5);
-
       }, () => {
         alert("Gagal mendapatkan lokasi.");
       });
