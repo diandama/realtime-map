@@ -8,28 +8,29 @@ const io = socketIo(server);
 
 app.use(express.static('public'));
 
-// Object untuk menyimpan semua marker, key = id marker
+// Objek untuk menyimpan semua marker, key = id marker
 let markers = {};
 
 io.on('connection', (socket) => {
-  // Kirim data marker terbaru saat client connect
+  // Kirim semua data marker saat client baru terkoneksi
   socket.emit('markersUpdate', markers);
 
-  // Tambah marker baru, bisa dengan ID dari client atau generate baru
+  // Tambah marker baru
   socket.on('addMarker', (data) => {
     const id = data.id || Date.now().toString();
+
     if (!markers[id]) {
       markers[id] = {
         lat: data.lat,
         lng: data.lng,
         votes: 1,
+        name: data.name || "Tanpa Nama"
       };
-      // Sebarkan update marker ke semua client
       io.emit('markersUpdate', markers);
     }
   });
 
-  // Voting pada marker tertentu
+  // Voting marker
   socket.on('voteMarker', (id) => {
     if (markers[id]) {
       markers[id].votes++;
@@ -37,7 +38,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Hapus marker berdasarkan id
+  // Hapus marker
   socket.on('deleteMarker', (id) => {
     if (markers[id]) {
       delete markers[id];
@@ -45,12 +46,11 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Update posisi marker (misal setelah marker digeser)
+  // Update posisi marker (misalnya setelah digeser)
   socket.on('updateMarkerPosition', ({ id, lat, lng }) => {
     if (markers[id]) {
       markers[id].lat = lat;
       markers[id].lng = lng;
-      // Kirim data marker terbaru ke semua client
       io.emit('markersUpdate', markers);
     }
   });
