@@ -1,39 +1,43 @@
 const express = require('express');
 const http = require('http');
-const socketIo = require('socket.io');
+const { Server } = require('socket.io');
+const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
-const io = socketIo(server);
+const io = new Server(server);
 
-app.use(express.static('public'));
+const PORT = process.env.PORT || 3000;
 
-// Objek untuk menyimpan semua marker, key = id marker
+// Serve static files (e.g., index.html)
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Data penyimpanan marker sementara di memori
 let markers = {};
 
+// Saat klien terhubung
 io.on('connection', (socket) => {
-  // Kirim semua data marker saat client baru terkoneksi
+  console.log('🔌 New client connected');
+
+  // Kirim data marker saat koneksi pertama
   socket.emit('markersUpdate', markers);
 
   // Tambah marker baru
   socket.on('addMarker', (data) => {
     const id = data.id || Date.now().toString();
-
-    if (!markers[id]) {
-      markers[id] = {
-        lat: data.lat,
-        lng: data.lng,
-        votes: 1,
-        name: data.name || "Tanpa Nama"
-      };
-      io.emit('markersUpdate', markers);
-    }
+    markers[id] = {
+      lat: data.lat,
+      lng: data.lng,
+      name: data.name || 'Tanpa Nama',
+      votes: 0
+    };
+    io.emit('markersUpdate', markers);
   });
 
   // Voting marker
   socket.on('voteMarker', (id) => {
     if (markers[id]) {
-      markers[id].votes++;
+      markers[id].votes += 1;
       io.emit('markersUpdate', markers);
     }
   });
@@ -46,17 +50,13 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Update posisi marker (misalnya setelah digeser)
-  socket.on('updateMarkerPosition', ({ id, lat, lng }) => {
-    if (markers[id]) {
-      markers[id].lat = lat;
-      markers[id].lng = lng;
-      io.emit('markersUpdate', markers);
-    }
+  // Saat user disconnect
+  socket.on('disconnect', () => {
+    console.log('❌ Client disconnected');
   });
 });
 
-const PORT = process.env.PORT || 3000;
+// Start server
 server.listen(PORT, () => {
-  console.log(`Server running at http://localhost:${PORT}`);
+  console.log(`🚀 Server running on http://localhost:${PORT}`);
 });
